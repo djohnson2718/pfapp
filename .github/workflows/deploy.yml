@@ -23,6 +23,7 @@ jobs:
       - name: Build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_REDIRECT_URI: https://djohnson2718.github.io/pfapp
         run: npm run build
 
       - name: Deploy to Pages
