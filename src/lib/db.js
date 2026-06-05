@@ -127,7 +127,7 @@ export async function updateAccountBalance(accountId, balance, date) {
     tx.onabort = () => reject(tx.error);
   });
 }
-
+ 
 export async function exportDataAsJSON() {
   const entries = await getAccountEntries();
   return JSON.stringify(entries, null, 2);
