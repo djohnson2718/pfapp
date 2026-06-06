@@ -730,6 +730,12 @@
   </div>
 
   {#if error}
+    <div class="card" style="border-color:#fca5a5; background:#fff1f2; margin-top:1rem; color:#991b1b;">
+      {error}
+    </div>
+  {/if}
+
+  {#if driveMessage && !error}
     <div class="card" style="border-color:#bfdbfe; background:#eff6ff; margin-top:1rem;">
       {driveMessage}
     </div>
@@ -834,7 +840,7 @@
         </label>
 
         <div class="modal-actions">
-          <button on:click={handleSaveAccount}>Save</button>
+          <button type="button" on:click={handleSaveAccount} disabled={loading}>Save</button>
           {#if !isNewAccount}
             <button class="danger" on:click={handleDeleteAccount}>Delete</button>
           {/if}
