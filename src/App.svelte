@@ -6,6 +6,8 @@
     getCurrentAccounts,
     getAccountEntries,
     updateAccountBalance,
+    addAccount,
+    deleteAccount,
     exportDataAsJSON,
     importDataFromJSON
   } from './lib/db.js';
@@ -20,7 +22,29 @@
   } from './lib/drive.js';
 
   let accounts = [];
-  const categories = ['Cash', 'Investments', 'Equity'];
+  const categoryOptions = [
+    { id: 'cash', name: 'Cash/Credit' },
+    { id: 'tax', name: 'Taxable Investments' },
+    { id: 'retirement', name: 'Retirement' },
+    { id: 'hsa', name: 'HSA' },
+    { id: 'edu', name: 'Education' },
+    { id: 'other', name: 'Other' }
+  ];
+
+  function normalizeCategoryId(category) {
+    if (!category) return 'other';
+    const normalized = categoryOptions.find(
+      (option) => option.id === category || option.name === category
+    );
+    return normalized ? normalized.id : 'other';
+  }
+
+  function getCategoryName(category) {
+    const normalizedId = normalizeCategoryId(category);
+    return categoryOptions.find((option) => option.id === normalizedId)?.name || 'Other';
+  }
+
+  const categoryIds = categoryOptions.map((category) => category.id);
   let loading = true;
   let error = '';
   let chartDiv;
@@ -30,16 +54,18 @@
   let chartDates = [];
   let chartHistorySeries = [];
   let activeEditId = null;
-  let activeForm = { balance: '', date: todayDate() };
+  let isNewAccount = false;
+  let activeForm = { name: '', balance: '', date: todayDate(), category: categoryOptions[0].id };
   let signedIn = false;
   let localDirty = false;
   let driveMessage = '';
   let lastDriveSync = null;
 
-  $: categoryTotals = categories.map((category) => ({
-    category,
+  $: categoryTotals = categoryOptions.map((category) => ({
+    category: category.name,
+    id: category.id,
     total: accounts
-      .filter((account) => account.category === category)
+      .filter((account) => normalizeCategoryId(account.category) === category.id)
       .reduce((sum, account) => sum + (account.balance ?? 0), 0)
   }));
 
@@ -47,8 +73,8 @@
 
   const pieChartOptions = {
     chart: { type: 'pie', toolbar: { show: false } },
-    labels: categories,
-    colors: ['#2c7be5', '#20c997', '#f59e0b'],
+    labels: categoryOptions.map((option) => option.name),
+    colors: ['#2c7be5', '#20c997', '#f59e0b', '#9333ea', '#f59e0b', '#6b7280'],
     legend: { position: 'bottom', horizontalAlign: 'center' },
     dataLabels: { enabled: true, formatter: (val) => `${val.toFixed(1)}%` },
     tooltip: { y: { formatter: (value) => `$${value.toLocaleString()}` } }
@@ -257,18 +283,18 @@
       accountGroups.get(key).push(entry);
     }
 
-    const series = categories.map((category) => ({ name: category, data: [] }));
+    const series = categoryOptions.map((category) => ({ name: category.name, data: [] }));
     const totalSeries = { name: 'Total', data: [] };
 
     for (const date of dates) {
-      const totals = new Map(categories.map((category) => [category, 0]));
+      const totals = new Map(categoryOptions.map((category) => [category.name, 0]));
       let total = 0;
 
       for (const entries of accountGroups.values()) {
         const latest = [...entries].reverse().find((entry) => entry.date <= date);
         if (!latest) continue;
-        const category = latest.category || 'Other';
-        totals.set(category, (totals.get(category) ?? 0) + (latest.balance ?? 0));
+        const categoryName = getCategoryName(latest.category);
+        totals.set(categoryName, (totals.get(categoryName) ?? 0) + (latest.balance ?? 0));
         total += latest.balance ?? 0;
       }
 
@@ -285,29 +311,77 @@
 
   function openEditModal(account) {
     activeEditId = account.id;
+    isNewAccount = false;
     activeForm = {
+      name: account.name,
       balance: account.balance ?? '',
-      date: todayDate()
+      date: todayDate(),
+      category: normalizeCategoryId(account.category)
+    };
+    error = '';
+  }
+
+  function openNewAccountModal() {
+    activeEditId = null;
+    isNewAccount = true;
+    activeForm = {
+      name: '',
+      balance: '',
+      date: todayDate(),
+      category: categoryOptions[0].id
     };
     error = '';
   }
 
   function closeEditModal() {
     activeEditId = null;
+    isNewAccount = false;
     error = '';
   }
 
-  async function handleUpdate(accountId) {
-    if (activeEditId !== accountId) return;
+  async function handleSaveAccount() {
+    if (!isNewAccount && activeEditId === null) {
+      return;
+    }
+
+    if (!activeForm.name?.trim()) {
+      error = 'Account name is required.';
+      return;
+    }
 
     const parsed = parseFloat(activeForm.balance);
     if (Number.isNaN(parsed)) {
       error = 'Invalid amount';
       return;
     }
+
     try {
       loading = true;
-      await updateAccountBalance(accountId, parsed, activeForm.date);
+      if (isNewAccount) {
+        await addAccount(activeForm.name.trim(), activeForm.category, parsed, activeForm.date);
+      } else {
+        await updateAccountBalance(activeEditId, parsed, activeForm.date, activeForm.category);
+      }
+      accounts = await getCurrentAccounts();
+      historyEntries = await getAccountEntries();
+      localDirty = true;
+      closeEditModal();
+    } catch (err) {
+      error = err.message;
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (isNewAccount || activeEditId === null) return;
+    if (!confirm('Delete this account and all related entries?')) {
+      return;
+    }
+
+    try {
+      loading = true;
+      await deleteAccount(activeEditId);
       accounts = await getCurrentAccounts();
       historyEntries = await getAccountEntries();
       localDirty = true;
@@ -663,7 +737,10 @@
 
   <div class="summary">
     <div class="card">
-      <h2>Current Balances</h2>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem;">
+        <h2 style="margin:0">Current Balances</h2>
+        <button on:click={openNewAccountModal}>New Account</button>
+      </div>
       {#if loading}
         <p>Loading current balances…</p>
       {:else}
@@ -681,7 +758,7 @@
             {#each accounts as account}
               <tr>
                 <td>{account.name}</td>
-                <td>{account.category}</td>
+                <td>{getCategoryName(account.category)}</td>
                 <td>{account.balance !== null ? formatter.format(account.balance) : '—'}</td>
                 <td>{account.date ? new Date(account.date).toLocaleDateString() : '—'}</td>
                 <td>
@@ -702,7 +779,7 @@
     </div>
   </div>
 
-  {#if activeEditId !== null}
+  {#if activeEditId !== null || isNewAccount}
     <div
       class="modal-backdrop"
       role="button"
@@ -716,8 +793,18 @@
       }}
     >
       <div class="modal" role="presentation" tabindex="-1" on:click|stopPropagation>
-        <h2>Update account balance</h2>
-        <p>{accounts.find((account) => account.id === activeEditId)?.name || 'Account'}</p>
+        <h2>{isNewAccount ? 'New account' : 'Update account balance'}</h2>
+        {#if isNewAccount}
+          <label>
+            Account name
+            <input
+              type="text"
+              bind:value={activeForm.name}
+            />
+          </label>
+        {:else}
+          <p>{accounts.find((account) => account.id === activeEditId)?.name || 'Account'}</p>
+        {/if}
 
         <label>
           Amount
@@ -730,6 +817,15 @@
         </label>
 
         <label>
+          Category
+          <select bind:value={activeForm.category}>
+            {#each categoryOptions as option}
+              <option value={option.id}>{option.name}</option>
+            {/each}
+          </select>
+        </label>
+
+        <label>
           Date
           <input
             type="date"
@@ -738,7 +834,10 @@
         </label>
 
         <div class="modal-actions">
-          <button on:click={() => handleUpdate(activeEditId)}>Save</button>
+          <button on:click={handleSaveAccount}>Save</button>
+          {#if !isNewAccount}
+            <button class="danger" on:click={handleDeleteAccount}>Delete</button>
+          {/if}
           <button class="secondary" on:click={closeEditModal}>Cancel</button>
         </div>
       </div>

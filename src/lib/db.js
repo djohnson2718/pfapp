@@ -1,14 +1,23 @@
 const DB_NAME = 'pfapp-finance';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_ACCOUNTS = 'accounts';
 
+const categories = [
+  {id: "cash", name: "Cash/Credit", sortOrder: 1},
+  {id: "tax", name: "Taxable Investments", sortOrder: 2},
+  {id: "retirement", name: "Retirement", sortOrder: 3},
+  {id: "hsa", name: "HSA", sortOrder: 4},
+  {id: "edu", name: "Education", sortOrder: 5},
+  {id: "other", name: "Other", sortOrder: 6}
+];
+
 const initialAccounts = [
-  { name: 'Wallet', category: 'Cash', balance: 850, date: '2026-06-01' },
-  { name: 'Checking Account', category: 'Cash', balance: 2300, date: '2026-06-02' },
-  { name: 'Savings', category: 'Cash', balance: 5200, date: '2026-06-01' },
-  { name: 'Brokerage', category: 'Investments', balance: 13750, date: '2026-06-05' },
-  { name: 'Retirement', category: 'Investments', balance: 18400, date: '2026-05-30' },
-  { name: 'Stock Options', category: 'Equity', balance: 6200, date: '2026-05-31' }
+  { id: "sample1", name: 'Wallet', category: 'cash', balance: 850, date: '2026-06-01' },
+  { id: "sample2", name: 'Checking Account', category: 'cash', balance: 2300, date: '2026-06-02' },
+  { id: "sample3", name: 'Savings', category: 'cash', balance: 5200, date: '2026-06-01' },
+  { id: "sample4", name: 'Brokerage', category: 'tax', balance: 13750, date: '2026-06-05' },
+  { id: "sample5", name: 'Retirement', category: 'retirement', balance: 18400, date: '2026-05-30' },
+  { id: "sample6", name: 'Stock Options', category: 'tax', balance: 6200, date: '2026-05-31' }
 ];
 
 function requestToPromise(request) {
@@ -24,22 +33,18 @@ function openDb() {
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      let store;
 
-      if (!db.objectStoreNames.contains(STORE_ACCOUNTS)) {
-        store = db.createObjectStore(STORE_ACCOUNTS, {
-          keyPath: 'id',
-          autoIncrement: true
-        });
-        store.createIndex('category', 'category', { unique: false });
-        store.createIndex('name', 'name', { unique: false });
-        store.createIndex('date', 'date', { unique: false });
-      } else {
-        store = request.transaction.objectStore(STORE_ACCOUNTS);
-        if (!store.indexNames.contains('date')) {
-          store.createIndex('date', 'date', { unique: false });
-        }
+      if (db.objectStoreNames.contains(STORE_ACCOUNTS)) {
+        db.deleteObjectStore(STORE_ACCOUNTS);
       }
+
+      const store = db.createObjectStore(STORE_ACCOUNTS, {
+        keyPath: 'id',
+        autoIncrement: true
+      });
+      store.createIndex('category', 'category', { unique: false });
+      store.createIndex('name', 'name', { unique: false });
+      store.createIndex('date', 'date', { unique: false });
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -105,7 +110,7 @@ export async function getAccountsByCategory(category) {
   return accounts;
 }
 
-export async function updateAccountBalance(accountId, balance, date) {
+export async function updateAccountBalance(accountId, balance, date, category) {
   const db = await openDb();
   const { store, tx } = await getStore(db, STORE_ACCOUNTS, 'readwrite');
   const account = await requestToPromise(store.get(accountId));
@@ -115,7 +120,7 @@ export async function updateAccountBalance(accountId, balance, date) {
 
   const newEntry = {
     name: account.name,
-    category: account.category,
+    category: category ?? account.category,
     balance,
     date
   };
@@ -123,6 +128,50 @@ export async function updateAccountBalance(accountId, balance, date) {
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve(newEntry);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+export async function addAccount(name, category, balance, date) {
+  const db = await openDb();
+  const { store, tx } = await getStore(db, STORE_ACCOUNTS, 'readwrite');
+  const newAccount = {
+    name,
+    category,
+    balance,
+    date
+  };
+  store.add(newAccount);
+
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(newAccount);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+export async function deleteAccount(accountId) {
+  const db = await openDb();
+  const { store, tx } = await getStore(db, STORE_ACCOUNTS, 'readwrite');
+  const account = await requestToPromise(store.get(accountId));
+  if (!account) {
+    throw new Error(`Account not found: ${accountId}`);
+  }
+
+  const index = store.index('name');
+  const request = index.openCursor(IDBKeyRange.only(account.name));
+
+  return new Promise((resolve, reject) => {
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+      }
+    };
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => resolve(true);
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
