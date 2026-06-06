@@ -14,6 +14,7 @@
     handleGoogleRedirect,
     ensureAccessToken,
     signOut as googleSignOut,
+    isSignedIn,
     getLatestBackupMeta,
     downloadBackup,
     uploadBackup
@@ -174,6 +175,7 @@
         await startGoogleSignIn();
         return;
       }
+      signedIn = true;
 
       const latest = await getLatestBackupMeta();
       const stored = getStoredSyncState();
@@ -193,6 +195,34 @@
       setStoredSyncState({ modifiedTime: file.modifiedTime });
       localDirty = false;
       driveMessage = `Saved changes to Drive as ${file.name}.`;
+    } catch (err) {
+      error = err.message;
+    }
+  }
+
+  async function manualRestore() {
+    try {
+      const token = await ensureAccessToken();
+      if (!token) {
+        // Kick off sign-in flow if not signed in
+        await startGoogleSignIn();
+        return;
+      }
+
+      driveMessage = 'Checking Drive for backup...';
+      const latest = await getLatestBackupMeta();
+      if (!latest) {
+        driveMessage = 'No Drive backup found.';
+        return;
+      }
+
+      driveMessage = 'Downloading backup from Drive...';
+      const content = await downloadBackup(latest.id);
+      await importDataFromJSON(content);
+      await loadAccounts();
+      setStoredSyncState({ modifiedTime: latest.modifiedTime });
+      localDirty = false;
+      driveMessage = `Restored backup from Drive (${latest.name}).`;
     } catch (err) {
       error = err.message;
     }
@@ -297,7 +327,7 @@
       error = err.message;
     }
 
-    signedIn = Boolean(await ensureAccessToken());
+    signedIn = Boolean(await ensureAccessToken()) || isSignedIn();
     await loadStoredSyncState();
     await loadAccounts();
 
@@ -462,6 +492,13 @@
     cursor: not-allowed;
   }
 
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    display: inline-block;
+  }
+
   .chart-panel {
     display: flex;
     align-items: center;
@@ -605,12 +642,19 @@
         <button class:selected={chartMode === 'line'} on:click={() => (chartMode = 'line')}>History</button>
       </div>
       <div class="drive-controls">
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-right:0.5rem;">
+          <span class="status-dot" style="background: {signedIn ? '#10b981' : '#9ca3af'}"></span>
+          <span style="font-weight:600; color: {signedIn ? '#065f46' : '#6b7280'}">{signedIn ? 'Signed in' : 'Not signed in'}</span>
+        </div>
+
         {#if signedIn}
           <button on:click={handleSignOut}>Sign out</button>
         {:else}
           <button on:click={handleSignIn}>Sign in to Drive</button>
         {/if}
+
         <button on:click={saveChangesToDrive} disabled={!localDirty}>Save Changes</button>
+        <button on:click={manualRestore} disabled={!signedIn}>Restore</button>
       </div>
       <div class="badge" style="background:#e0f2fe; color:#0369a1">
         {loading ? 'Loading…' : formatter.format(totalAssets)}

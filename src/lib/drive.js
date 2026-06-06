@@ -60,6 +60,8 @@ export function startGoogleSignIn() {
   const state = randomString(16);
   sessionStorage.setItem(PKCE_VERIFIER_KEY, codeVerifier);
   sessionStorage.setItem(OAUTH_STATE_KEY, state);
+  console.log('OAuth redirect_uri:', REDIRECT_URI);
+  console.log('OAuth auth endpoint:', AUTH_ENDPOINT);
 
   return sha256(codeVerifier).then((codeChallenge) => {
     const params = new URLSearchParams({
@@ -115,6 +117,14 @@ export async function handleGoogleRedirect() {
     redirect_uri: REDIRECT_URI
   });
 
+  console.log('Token exchange request', {
+    client_id: CLIENT_ID,
+    code: code?.slice(0, 8) + '...',
+    redirect_uri: REDIRECT_URI,
+    code_verifier_length: codeVerifier?.length,
+    body: params.toString()
+  });
+
   const response = await fetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -123,6 +133,7 @@ export async function handleGoogleRedirect() {
 
   if (!response.ok) {
     const body = await response.text();
+    console.error('Token exchange failed response:', response.status, body);
     throw new Error(`Token exchange failed: ${body}`);
   }
 
@@ -148,6 +159,14 @@ export async function refreshAccessToken() {
     refresh_token: tokens.refresh_token
   });
 
+    console.log('Refresh access token request', {
+    client_id: CLIENT_ID,
+    code: code?.slice(0, 8) + '...',
+    redirect_uri: REDIRECT_URI,
+    code_verifier_length: codeVerifier?.length,
+    body: params.toString()
+  });
+
   const response = await fetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -156,6 +175,7 @@ export async function refreshAccessToken() {
 
   if (!response.ok) {
     clearTokens();
+    console.log('Token refresh failed response:', response.status, await response.text());
     throw new Error('Failed to refresh token');
   }
 
