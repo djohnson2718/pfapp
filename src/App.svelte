@@ -11,7 +11,6 @@
   } from './lib/db.js';
   import {
     startGoogleSignIn,
-    handleGoogleRedirect,
     ensureAccessToken,
     signOut as googleSignOut,
     isSignedIn,
@@ -321,12 +320,6 @@
   }
 
   onMount(async () => {
-    try {
-      await handleGoogleRedirect();
-    } catch (err) {
-      error = err.message;
-    }
-
     signedIn = Boolean(await ensureAccessToken()) || isSignedIn();
     await loadStoredSyncState();
     await loadAccounts();
